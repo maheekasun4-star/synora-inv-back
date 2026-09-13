@@ -14,6 +14,10 @@ if (!ellaDatabaseUrl) {
   throw new Error('Missing database URL. Set ELLA_PMS_DATABASE_URL or DATABASE_URL before starting the app.');
 }
 
+if (ellaDatabaseUrl.startsWith('prisma://')) {
+  throw new Error('Invalid Prisma data-proxy URL detected for auth database. Use a direct database URL such as mysql://... instead of prisma://...');
+}
+
 const ellaPrisma = new PrismaClient({
   datasources: { db: { url: ellaDatabaseUrl } },
   log: process.env.NODE_ENV === 'development' ? ['error', 'warn'] : ['error'],
