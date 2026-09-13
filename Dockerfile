@@ -1,6 +1,9 @@
-FROM node:24-alpine
+FROM node:24-bookworm-slim
 
 WORKDIR /app
+
+# Prisma requires OpenSSL libraries at runtime.
+RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates && rm -rf /var/lib/apt/lists/*
 
 # Copy package files first for layer caching
 COPY package*.json ./
