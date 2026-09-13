@@ -1,0 +1,401 @@
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// ---------------------------------------------------------------------------
+// ENUMS
+// ---------------------------------------------------------------------------
+
+enum RequestType {
+  purchase_request
+  store_request
+  kitchen_request
+  grn_receiving
+}
+
+enum ApprovalStatus {
+  pending
+  approved
+  rejected
+  cancelled
+}
+
+enum ApprovalActionType {
+  approved
+  rejected
+}
+
+enum PoStatus {
+  open
+  partially_received
+  completed
+  cancelled
+}
+
+enum GrnStatus {
+  pending_approval
+  approved
+  rejected
+}
+
+// ---------------------------------------------------------------------------
+// TAX CLASSES
+// ---------------------------------------------------------------------------
+
+model TaxClass {
+  id    Int            @id @default(autoincrement())
+  name  String         @db.VarChar(100)
+  rates TaxClassRate[]
+  items Item[]
+  quotationItems QuotationItem[]
+
+  @@map("tax_classes")
+}
+
+model TaxClassRate {
+  id         Int      @id @default(autoincrement())
+  taxClassId Int      @map("tax_class_id")
+  taxName    String   @db.VarChar(50) @map("tax_name")
+  rate       Decimal  @db.Decimal(5, 2)
+  taxClass   TaxClass @relation(fields: [taxClassId], references: [id], onDelete: Cascade)
+
+  @@map("tax_class_rates")
+}
+
+// ---------------------------------------------------------------------------
+// ITEM CATEGORIES (3-level hierarchy)
+// ---------------------------------------------------------------------------
+
+model ItemCategory {
+  id       Int            @id @default(autoincrement())
+  name     String         @db.VarChar(100)
+  parentId Int?           @map("parent_id")
+  level    Int
+
+  parent   ItemCategory?  @relation("CategoryHierarchy", fields: [parentId], references: [id])
+  children ItemCategory[] @relation("CategoryHierarchy")
+  items    Item[]
+
+  @@map("item_categories")
+}
+
+// ---------------------------------------------------------------------------
+// ITEMS
+// ---------------------------------------------------------------------------
+
+model Item {
+  id             Int          @id @default(autoincrement())
+  itemCode       String       @unique @db.VarChar(50) @map("item_code")
+  name           String       @db.VarChar(255)
+  description    String?      @db.VarChar(500)
+  categoryId     Int          @map("category_id")
+  unitType       String       @db.VarChar(30) @map("unit_type")
+  reorderLevel   Decimal?     @db.Decimal(20, 4) @map("reorder_level")
+  reorderQty     Decimal?     @db.Decimal(20, 4) @map("reorder_qty")
+  minQty         Decimal?     @db.Decimal(20, 4) @map("min_qty")
+  maxQty         Decimal?     @db.Decimal(20, 4) @map("max_qty")
+  taxClassId     Int?         @map("tax_class_id")
+  chartOfAccount String?      @db.VarChar(50) @map("chart_of_account")
+  isActive       Boolean      @default(true) @map("is_active")
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamp(0)
+  updatedAt      DateTime     @updatedAt @map("updated_at") @db.Timestamp(0)
+
+  category              ItemCategory          @relation(fields: [categoryId], references: [id])
+  taxClass              TaxClass?             @relation(fields: [taxClassId], references: [id])
+  approvalRequestItems  ApprovalRequestItem[]
+  quotationItems        QuotationItem[]
+  poItems               PurchaseOrderItem[]
+  grnItems              GrnItem[]
+
+  @@index([categoryId])
+  @@index([taxClassId])
+  @@map("items")
+}
+
+// ---------------------------------------------------------------------------
+// SUPPLIERS
+// ---------------------------------------------------------------------------
+
+model Supplier {
+  id          Int              @id @default(autoincrement())
+  name        String           @db.VarChar(255)
+  contactInfo String?          @db.VarChar(255) @map("contact_info")
+  isActive    Boolean          @default(true) @map("is_active")
+  createdAt   DateTime         @default(now()) @map("created_at") @db.Timestamp(0)
+  updatedAt   DateTime         @updatedAt @map("updated_at") @db.Timestamp(0)
+
+  quotations     Quotation[]
+  purchaseOrders PurchaseOrder[]
+  grns           GoodsReceivedNote[]
+
+  @@map("suppliers")
+}
+
+// ---------------------------------------------------------------------------
+// DEPARTMENTS
+// ---------------------------------------------------------------------------
+
+model Department {
+  id        Int               @id @default(autoincrement())
+  name      String            @db.VarChar(100)
+  isActive  Boolean           @default(true) @map("is_active")
+  createdAt DateTime          @default(now()) @map("created_at") @db.Timestamp(0)
+
+  purchaseRequests PurchaseRequest[]
+
+  @@map("departments")
+}
+
+// ---------------------------------------------------------------------------
+// STORES
+// ---------------------------------------------------------------------------
+
+model Store {
+  id        Int               @id @default(autoincrement())
+  name      String            @db.VarChar(100)
+  location  String?           @db.VarChar(255)
+  isActive  Boolean           @default(true) @map("is_active")
+  createdAt DateTime          @default(now()) @map("created_at") @db.Timestamp(0)
+
+  grns GoodsReceivedNote[]
+
+  @@map("stores")
+}
+
+// ---------------------------------------------------------------------------
+// APPROVAL FRAMEWORK
+// ---------------------------------------------------------------------------
+
+model ApprovalLevel {
+  id           Int         @id @default(autoincrement())
+  requestType  RequestType @map("request_type")
+  levelOrder   Int         @map("level_order")
+  levelName    String      @db.VarChar(100) @map("level_name")
+  requiredRole String      @db.VarChar(50) @map("required_role")
+
+  requestItems ApprovalRequestItem[]
+  actions      ApprovalAction[]
+
+  @@unique([requestType, levelOrder])
+  @@map("approval_levels")
+}
+
+model ApprovalRequest {
+  id           Int            @id @default(autoincrement())
+  requestType  RequestType    @map("request_type")
+  requestedBy  Int            @map("requested_by")  // ella_pms user id (cross-DB, no FK)
+  departmentId Int?           @map("department_id")
+  status       ApprovalStatus @default(pending)
+  currentLevel Int            @default(1) @map("current_level")
+  createdAt    DateTime       @default(now()) @map("created_at") @db.Timestamp(0)
+  updatedAt    DateTime       @updatedAt @map("updated_at") @db.Timestamp(0)
+
+  items           ApprovalRequestItem[]
+  actions         ApprovalAction[]
+  purchaseRequest PurchaseRequest?
+  grn             GoodsReceivedNote?
+
+  @@map("approval_requests")
+}
+
+model ApprovalRequestItem {
+  id                Int              @id @default(autoincrement())
+  approvalRequestId Int              @map("approval_request_id")
+  // NULL = original submission; non-null = approver snapshot at that level
+  levelId           Int?             @map("level_id")
+  itemId            Int              @map("item_id")
+  quantity          Decimal          @db.Decimal(20, 4)
+  unitPrice         Decimal?         @db.Decimal(20, 4) @map("unit_price")
+  vat               Decimal          @default(0) @db.Decimal(20, 4)
+  discount          Decimal          @default(0) @db.Decimal(20, 4)
+  chartOfAccount    String?          @db.VarChar(50) @map("chart_of_account")
+  reason            String?          @db.VarChar(255)
+
+  approvalRequest ApprovalRequest @relation(fields: [approvalRequestId], references: [id])
+  level           ApprovalLevel?  @relation(fields: [levelId], references: [id])
+  item            Item            @relation(fields: [itemId], references: [id])
+
+  @@index([approvalRequestId])
+  @@index([levelId])
+  @@map("approval_request_items")
+}
+
+model ApprovalAction {
+  id                Int                @id @default(autoincrement())
+  approvalRequestId Int                @map("approval_request_id")
+  levelId           Int                @map("level_id")
+  approvedBy        Int                @map("approved_by")  // ella_pms user id
+  action            ApprovalActionType
+  comment           String?            @db.VarChar(255)
+  actedAt           DateTime           @default(now()) @map("acted_at") @db.Timestamp(0)
+
+  approvalRequest ApprovalRequest @relation(fields: [approvalRequestId], references: [id])
+  level           ApprovalLevel   @relation(fields: [levelId], references: [id])
+
+  @@index([approvalRequestId])
+  @@map("approval_actions")
+}
+
+// ---------------------------------------------------------------------------
+// PURCHASE REQUESTS (Sprint 1)
+// ---------------------------------------------------------------------------
+
+model PurchaseRequest {
+  id                Int             @id @default(autoincrement())
+  approvalRequestId Int             @unique @map("approval_request_id")
+  prCode            String          @unique @db.VarChar(50) @map("pr_code")
+  requestedDate     DateTime        @db.Date @map("requested_date")
+  subDepartmentId   Int?            @map("sub_department_id")
+  advanceAmount     Decimal?        @db.Decimal(20, 4) @map("advance_amount")
+  eventId           Int?            @map("event_id")
+  eventName         String?         @db.VarChar(100) @map("event_name")
+  createdAt         DateTime        @default(now()) @map("created_at") @db.Timestamp(0)
+
+  approvalRequest ApprovalRequest @relation(fields: [approvalRequestId], references: [id])
+  subDepartment   Department?     @relation(fields: [subDepartmentId], references: [id])
+  purchaseOrders  PurchaseOrder[]
+  quotations      Quotation[]
+
+  @@map("purchase_requests")
+}
+
+// ---------------------------------------------------------------------------
+// QUOTATIONS (Sprint 2)
+// ---------------------------------------------------------------------------
+
+model Quotation {
+  id                Int              @id @default(autoincrement())
+  quotationCode     String           @unique @db.VarChar(50) @map("quotation_code")
+  supplierId        Int              @map("supplier_id")
+  purchaseRequestId Int?             @map("purchase_request_id")
+  fromDate          DateTime?        @db.Date @map("from_date")
+  toDate            DateTime?        @db.Date @map("to_date")
+  isActive          Boolean          @default(true) @map("is_active")
+  createdAt         DateTime         @default(now()) @map("created_at") @db.Timestamp(0)
+  updatedAt         DateTime         @updatedAt @map("updated_at") @db.Timestamp(0)
+
+  supplier        Supplier         @relation(fields: [supplierId], references: [id])
+  purchaseRequest PurchaseRequest? @relation(fields: [purchaseRequestId], references: [id])
+  items           QuotationItem[]
+
+  @@index([supplierId])
+  @@map("quotations")
+}
+
+model QuotationItem {
+  id          Int      @id @default(autoincrement())
+  quotationId Int      @map("quotation_id")
+  itemId      Int      @map("item_id")
+  price       Decimal  @db.Decimal(20, 4)
+  minQty      Decimal? @db.Decimal(20, 4) @map("min_qty")
+  maxQty      Decimal? @db.Decimal(20, 4) @map("max_qty")
+  taxClassId  Int?     @map("tax_class_id")
+
+  quotation  Quotation @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+  item       Item      @relation(fields: [itemId], references: [id])
+  taxClass   TaxClass? @relation(fields: [taxClassId], references: [id])
+
+  @@map("quotation_items")
+}
+
+// ---------------------------------------------------------------------------
+// PURCHASE ORDERS (Sprint 2)
+// ---------------------------------------------------------------------------
+
+model PurchaseOrder {
+  id                Int               @id @default(autoincrement())
+  poCode            String            @unique @db.VarChar(50) @map("po_code")
+  supplierId        Int               @map("supplier_id")
+  purchaseRequestId Int?              @map("purchase_request_id")
+  orderDate         DateTime          @db.Date @map("order_date")
+  paymentType       String?           @db.VarChar(50) @map("payment_type")
+  deliveryAddress   String?           @db.VarChar(255) @map("delivery_address")
+  grossValue        Decimal           @db.Decimal(20, 4) @map("gross_value")
+  taxValue          Decimal           @db.Decimal(20, 4) @map("tax_value")
+  netValue          Decimal           @db.Decimal(20, 4) @map("net_value")
+  status            PoStatus          @default(open)
+  cancelReason      String?           @db.VarChar(255) @map("cancel_reason")
+  createdAt         DateTime          @default(now()) @map("created_at") @db.Timestamp(0)
+  updatedAt         DateTime          @updatedAt @map("updated_at") @db.Timestamp(0)
+
+  supplier        Supplier         @relation(fields: [supplierId], references: [id])
+  purchaseRequest PurchaseRequest? @relation(fields: [purchaseRequestId], references: [id])
+  items           PurchaseOrderItem[]
+  grns            GoodsReceivedNote[]
+
+  @@index([supplierId])
+  @@index([status])
+  @@map("purchase_orders")
+}
+
+model PurchaseOrderItem {
+  id              Int           @id @default(autoincrement())
+  purchaseOrderId Int           @map("purchase_order_id")
+  itemId          Int           @map("item_id")
+  quantity        Decimal       @db.Decimal(20, 4)
+  unitPrice       Decimal       @db.Decimal(20, 4) @map("unit_price")
+  taxRate         Decimal       @default(0) @db.Decimal(5, 2) @map("tax_rate")
+  discountRate    Decimal       @default(0) @db.Decimal(5, 2) @map("discount_rate")
+  lineTotal       Decimal       @db.Decimal(20, 4) @map("line_total")
+  // Tracks cumulative received qty across all approved GRNs for this PO line
+  receivedQty     Decimal       @default(0) @db.Decimal(20, 4) @map("received_qty")
+
+  purchaseOrder PurchaseOrder @relation(fields: [purchaseOrderId], references: [id])
+  item          Item          @relation(fields: [itemId], references: [id])
+
+  @@map("purchase_order_items")
+}
+
+// ---------------------------------------------------------------------------
+// GOODS RECEIVED NOTES (Sprint 3)
+// ---------------------------------------------------------------------------
+
+model GoodsReceivedNote {
+  id                Int       @id @default(autoincrement())
+  grnCode           String    @unique @db.VarChar(50) @map("grn_code")
+  approvalRequestId Int       @unique @map("approval_request_id")
+  purchaseOrderId   Int       @map("purchase_order_id")
+  supplierId        Int       @map("supplier_id")
+  supplierInvoiceNo String?   @db.VarChar(100) @map("supplier_invoice_no")
+  receivedDate      DateTime  @db.Date @map("received_date")
+  grossValue        Decimal   @db.Decimal(20, 4) @map("gross_value")
+  netValue          Decimal   @db.Decimal(20, 4) @map("net_value")
+  status            GrnStatus @default(pending_approval)
+  currentLevel      Int       @default(1) @map("current_level")
+  storeId           Int       @map("store_id")
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamp(0)
+  updatedAt         DateTime  @updatedAt @map("updated_at") @db.Timestamp(0)
+
+  approvalRequest ApprovalRequest @relation(fields: [approvalRequestId], references: [id])
+  purchaseOrder   PurchaseOrder   @relation(fields: [purchaseOrderId], references: [id])
+  supplier        Supplier        @relation(fields: [supplierId], references: [id])
+  store           Store           @relation(fields: [storeId], references: [id])
+  items           GrnItem[]
+
+  @@index([purchaseOrderId])
+  @@index([status])
+  @@map("goods_received_notes")
+}
+
+model GrnItem {
+  id         Int               @id @default(autoincrement())
+  grnId      Int               @map("grn_id")
+  itemId     Int               @map("item_id")
+  quantity   Decimal           @db.Decimal(20, 6)
+  unitPrice  Decimal           @db.Decimal(20, 6) @map("unit_price")
+  discount   Decimal           @default(0) @db.Decimal(20, 6)
+  taxValue   Decimal           @default(0) @db.Decimal(20, 6) @map("tax_value")
+  netPrice   Decimal           @db.Decimal(20, 4) @map("net_price")
+  expiryDate DateTime?         @db.Date @map("expiry_date")
+  serialNo   String?           @db.VarChar(100) @map("serial_no")
+
+  grn  GoodsReceivedNote @relation(fields: [grnId], references: [id])
+  item Item              @relation(fields: [itemId], references: [id])
+
+  @@map("grn_items")
+}
