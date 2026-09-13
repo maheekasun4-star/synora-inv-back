@@ -27,7 +27,10 @@ app.use(express.json());
 
 // ─── Health check ─────────────────────────────────────────────────────────────
 
-app.get('/health', (_req, res) => res.json({ status: 'ok', service: 'hotel-inventory' }));
+app.get('/health', (_req, res) => res.send('kasun echarai'));
+
+// Backward-compatible health endpoint kept for callers expecting JSON
+app.get('/newhealth', (_req, res) => res.json({ status: 'ok', service: 'hotel-inventory' }));
 
 // ─── Public routes ────────────────────────────────────────────────────────────
 
